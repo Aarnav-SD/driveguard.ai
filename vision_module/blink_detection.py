@@ -65,7 +65,7 @@ while True:
 
             ear = (left_ear + right_ear) / 2
 
-            # smoothing
+           
             ear_history.append(ear)
             if len(ear_history) > 5:
                 ear_history.pop(0)
