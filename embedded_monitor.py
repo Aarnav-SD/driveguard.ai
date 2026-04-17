@@ -32,7 +32,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--road-camera", type=int, default=1)
     parser.add_argument("--speed-kmph", type=float, default=60.0)
     parser.add_argument("--steering-stability", type=float, default=0.78)
-    parser.add_argument("--analysis-window", type=int, default=45)
+    parser.add_argument("--analysis-window", type=int, default=20)
     parser.add_argument("--fps-hint", type=float, default=15.0)
     parser.add_argument("--single-camera", action="store_true")
     return parser.parse_args()
@@ -58,13 +58,30 @@ def play_alert(risk_band: str, last_alert_time: float) -> float:
     now = time.time()
     if winsound is None:
         return last_alert_time
-    if risk_band == "critical" and (now - last_alert_time) > 2.0:
-        winsound.Beep(1800, 500)
-        return now
-    if risk_band in {"warning", "assist"} and (now - last_alert_time) > 4.0:
-        winsound.Beep(1200, 250)
+    try:
+        if risk_band == "critical" and (now - last_alert_time) > 1.0:
+            winsound.Beep(2000, 700)
+            return now
+        if risk_band == "assist" and (now - last_alert_time) > 1.8:
+            winsound.Beep(1500, 450)
+            return now
+        if risk_band == "warning" and (now - last_alert_time) > 2.5:
+            winsound.Beep(1100, 250)
+            return now
+    except RuntimeError:
+        winsound.MessageBeep(winsound.MB_ICONHAND)
         return now
     return last_alert_time
+
+
+def alert_band_for_output(decision, driver_summary) -> str:
+    if driver_summary.fatigue_label == "SLEEPY":
+        return "critical"
+    if driver_summary.fatigue_label == "FATIGUE" and decision.risk_band == "monitor":
+        return "assist"
+    if driver_summary.fatigue_label == "FATIGUE" and decision.risk_band == "warning":
+        return "assist"
+    return decision.risk_band
 
 
 def annotate_driver_frame(frame, decision, driver_summary, road_summary) -> None:
@@ -74,6 +91,8 @@ def annotate_driver_frame(frame, decision, driver_summary, road_summary) -> None
         f"Fatigue Score: {decision.fatigue_score}",
         f"Action Band: {decision.risk_band}",
         f"EAR: {driver_summary.ear:.3f}",
+        f"Eyes Visible Ratio: {driver_summary.eyes_detect_ratio:.2f}",
+        f"Eyes Closed Duration: {driver_summary.closed_duration_s:.2f}s",
         f"Blink Rate: {driver_summary.state.blink_rate:.1f}/min",
         f"Head Nod Rate: {driver_summary.state.head_nod_rate:.1f}",
         f"Road: {road_summary.context.road_type}",
@@ -176,7 +195,10 @@ def main() -> int:
                     vehicle_state,
                     last_road_summary.context,
                 )
-                last_alert_time = play_alert(last_decision.risk_band, last_alert_time)
+                last_alert_time = play_alert(
+                    alert_band_for_output(last_decision, last_driver_summary),
+                    last_alert_time,
+                )
 
             display_driver = driver_frame.copy()
             if last_decision and last_driver_summary and last_road_summary:
@@ -189,10 +211,10 @@ def main() -> int:
             else:
                 cv2.putText(
                     display_driver,
-                    "Collecting initial sensor window...",
+                    "Collecting initial sensor window... Hold eyes closed for 1-2 seconds to test alert.",
                     (20, 40),
                     cv2.FONT_HERSHEY_SIMPLEX,
-                    0.8,
+                    0.65,
                     (255, 255, 255),
                     2,
                 )
@@ -205,7 +227,10 @@ def main() -> int:
                     annotate_road_frame(display_road, last_road_summary, last_road_risk)
                 cv2.imshow("DriveGuard AI - Road Monitor", display_road)
 
-            if cv2.waitKey(1) & 0xFF in (ord("q"), ord("Q")):
+            key = cv2.waitKey(1) & 0xFF
+            if key in (ord("b"), ord("B")):
+                play_alert("critical", 0.0)
+            if key in (ord("q"), ord("Q")):
                 break
     finally:
         driver_camera.release()
